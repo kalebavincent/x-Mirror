@@ -1,64 +1,30 @@
-import subprocess
-import asyncio  # Ajouté pour utiliser asyncio.create_subprocess_shell
-import tempfile
-import os
+from io import BytesIO
 
-from bot import LOGGER, application  # v20 utilise application au lieu de dispatcher
-from telegram import Update
-from telegram.constants import ParseMode
-from telegram.ext import CommandHandler, ContextTypes
-
-from bot.helper.telegram_helper.filters import CustomFilters
-from bot.helper.telegram_helper.bot_commands import BotCommands
+from .. import LOGGER
+from ..helper.ext_utils.bot_utils import cmd_exec, new_task
+from ..helper.telegram_helper.message_utils import send_message, send_file
 
 
-async def shell(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = update.effective_message
-    cmd = message.text.split(' ', 1)
+@new_task
+async def run_shell(_, message):
+    cmd = message.text.split(maxsplit=1)
     if len(cmd) == 1:
-        await message.reply_text("Aucune commande à exécuter n'a été donnée.")
+        await send_message(message, "No command to execute was given.")
         return
-
     cmd = cmd[1]
-    # Exécuter la commande shell de façon non bloquante
-    process = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await process.communicate()
-    stdout = stdout.decode().strip()
-    stderr = stderr.decode().strip()
-
-    reply = ''
-    if stdout:
-        reply += f"*Sortie standard*\n`{stdout}`\n"
+    stdout, stderr, _ = await cmd_exec(cmd, shell=True)
+    reply = ""
+    if len(stdout) != 0:
+        reply += f"*Stdout*\n<code>{stdout}</code>\n"
         LOGGER.info(f"Shell - {cmd} - {stdout}")
-    if stderr:
-        reply += f"*Erreur standard*\n`{stderr}`\n"
+    if len(stderr) != 0:
+        reply += f"*Stderr*\n<code>{stderr}</code>"
         LOGGER.error(f"Shell - {cmd} - {stderr}")
-
     if len(reply) > 3000:
-        # Écrire la sortie dans un fichier temporaire et l'envoyer
-        with tempfile.NamedTemporaryFile('w+', delete=False, suffix='.txt') as tmp_file:
-            tmp_file.write(reply)
-            tmp_filepath = tmp_file.name
-
-        await context.bot.send_document(
-            chat_id=message.chat_id,
-            document=open(tmp_filepath, 'rb'),
-            filename=os.path.basename(tmp_filepath),
-            reply_to_message_id=message.message_id
-        )
-        os.remove(tmp_filepath)
+        with BytesIO(str.encode(reply)) as out_file:
+            out_file.name = "shell_output.txt"
+            await send_file(message, out_file)
+    elif len(reply) != 0:
+        await send_message(message, reply)
     else:
-        await message.reply_text(reply, parse_mode=ParseMode.MARKDOWN)
-
-
-shell_handler = CommandHandler(
-    BotCommands.ShellCommand,
-    shell,
-    filters=CustomFilters.owner_filter
-)
-
-application.add_handler(shell_handler)  # Remplace dispatcher par application
+        await send_message(message, "No Reply")

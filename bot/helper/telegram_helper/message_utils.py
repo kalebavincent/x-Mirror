@@ -1,212 +1,271 @@
-import os
-import asyncio
-import psutil
-import shutil
-import time
+from asyncio import sleep
+from re import match as re_match
+from time import time
+from pytdbot.types import Error
 
-from PIL import Image
-from telegram import InlineKeyboardMarkup, Message, Update
-from telegram.error import TimedOut, BadRequest, RetryAfter
-
-from bot import (
-    AUTO_DELETE_MESSAGE_DURATION, LOGGER, bot,
-    status_reply_dict, status_reply_dict_lock, download_dict, download_dict_lock,
-    botStartTime, Interval, DOWNLOAD_STATUS_UPDATE_INTERVAL
-)
-from bot.helper.ext_utils.bot_utils import (
-    get_readable_message, get_readable_file_size, get_readable_time,
-    MirrorStatus, setInterval
-)
+from ... import LOGGER, status_dict, task_dict_lock, intervals, DOWNLOAD_DIR
+from ...core.config_manager import Config
+from ...core.telegram_client import TgClient
+from ..ext_utils.bot_utils import SetInterval
+from ..ext_utils.exceptions import TgLinkException
+from ..ext_utils.status_utils import get_readable_message
 
 
-def sendMessage(text: str, bot, update: Update):
-    try:
-        return bot.send_message(
-            update.message.chat_id,
-            reply_to_message_id=update.message.message_id,
-            text=text,
-            allow_sending_without_reply=True,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-    except RetryAfter as r:
-        LOGGER.error(str(r))
-        time.sleep(r.retry_after)
-        return sendMessage(text, bot, update)
-    except Exception as e:
-        LOGGER.error(str(e))
+async def send_message(message, text, buttons=None, block=True):
+    res = await message.reply_text(
+        text=text,
+        disable_web_page_preview=True,
+        disable_notification=True,
+        reply_markup=buttons,
+    )
+    if isinstance(res, Error):
+        if res["message"].startswith("Trop de demandes : réessayer après"):
+            LOGGER.warning(res["message"])
+            if block:
+                wait_for = int(res["message"].rsplit(" ", 1)[-1])
+                await sleep(wait_for * 1.2)
+                return await send_message(message, text, buttons)
+        LOGGER.error(res["message"])
+        return res["message"]
+    return res
 
 
-def sendMarkup(text: str, bot, update: Update, reply_markup: InlineKeyboardMarkup):
-    try:
-        return bot.send_message(
-            update.message.chat_id,
-            reply_to_message_id=update.message.message_id,
-            text=text,
-            reply_markup=reply_markup,
-            allow_sending_without_reply=True,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-    except RetryAfter as r:
-        LOGGER.error(str(r))
-        time.sleep(r.retry_after)
-        return sendMarkup(text, bot, update, reply_markup)
-    except Exception as e:
-        LOGGER.error(str(e))
+async def edit_message(message, text, buttons=None, block=True):
+    res = await message.edit_text(
+        text=text,
+        disable_web_page_preview=True,
+        reply_markup=buttons,
+    )
+    if isinstance(res, Error):
+        if res["message"].startswith("Trop de demandes : réessayer après"):
+            LOGGER.warning(res["message"])
+            if block:
+                wait_for = int(res["message"].rsplit(" ", 1)[-1])
+                await sleep(wait_for * 1.2)
+                return await edit_message(message, text, buttons)
+        LOGGER.error(res["message"])
+        return res["message"]
+    return res
 
 
-def editMessage(text: str, message: Message, reply_markup=None):
-    try:
-        bot.edit_message_text(
-            text=text,
-            message_id=message.message_id,
-            chat_id=message.chat.id,
-            reply_markup=reply_markup,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
-    except RetryAfter as r:
-        LOGGER.error(str(r))
-        time.sleep(r.retry_after)
-        return editMessage(text, message, reply_markup)
-    except Exception as e:
-        LOGGER.error(str(e))
+async def send_file(message, file, caption=""):
+    res = await message.reply_document(
+        document=file, caption=caption, disable_notification=True
+    )
+    if isinstance(res, Error):
+        if res["message"].startswith("Trop de demandes : réessayer après"):
+            LOGGER.warning(res["message"])
+            wait_for = int(res["message"].rsplit(" ", 1)[-1])
+            await sleep(wait_for * 1.2)
+            return await send_file(message, file, caption)
+        LOGGER.error(res["message"])
+        return res["message"]
+    return res
 
 
-def deleteMessage(bot, message: Message):
-    try:
-        bot.delete_message(
-            chat_id=message.chat.id,
-            message_id=message.message_id
-        )
-    except Exception as e:
-        LOGGER.error(str(e))
+async def send_rss(text, chat_id, thread_id):
+    app = TgClient.user or TgClient.bot
+    res = await app.sendTextMessage(
+        chat_id=chat_id,
+        text=text,
+        disable_web_page_preview=True,
+        message_thread_id=thread_id,
+        disable_notification=True,
+    )
+    if isinstance(res, Error):
+        if res["message"].startswith("Trop de demandes : réessayer après"):
+            LOGGER.warning(res["message"])
+            wait_for = int(res["message"].rsplit(" ", 1)[-1])
+            await sleep(wait_for * 1.2)
+            return await send_rss(text)
+        LOGGER.error(res["message"])
+        return res["message"]
+    return res
 
 
-def sendLogFile(bot, update: Update):
-    with open('log.txt', 'rb') as f:
-        bot.send_document(
-            document=f,
-            filename=f.name,
-            reply_to_message_id=update.message.message_id,
-            chat_id=update.message.chat_id
-        )
+async def delete_message(message):
+    res = await message.delete()
+    if isinstance(res, Error):
+        LOGGER.error(res["message"])
 
 
-async def auto_delete_message(bot, cmd_message: Message, bot_message: Message):
-    if AUTO_DELETE_MESSAGE_DURATION != -1:
-        await asyncio.sleep(AUTO_DELETE_MESSAGE_DURATION)
-        try:
-            deleteMessage(bot, cmd_message)
-            deleteMessage(bot, bot_message)
-        except AttributeError:
-            pass
+async def auto_delete_message(cmd_message=None, bot_message=None):
+    await sleep(60)
+    if cmd_message is not None:
+        await delete_message(cmd_message)
+    if bot_message is not None:
+        await delete_message(bot_message)
 
 
-def delete_all_messages():
-    with status_reply_dict_lock:
-        for message in list(status_reply_dict.values()):
+async def delete_status():
+    async with task_dict_lock:
+        for key, data in list(status_dict.items()):
             try:
-                deleteMessage(bot, message)
-                del status_reply_dict[message.chat.id]
+                await delete_message(data["message"])
+                del status_dict[key]
             except Exception as e:
                 LOGGER.error(str(e))
 
 
-def update_all_messages():
-    total, used, free = shutil.disk_usage('.')
-    free = get_readable_file_size(free)
-    currentTime = get_readable_time(time.time() - botStartTime)
-    msg, buttons = get_readable_message()
-    msg += (
-        f"<b>CPU:</b> {psutil.cpu_percent()}%"
-        f" <b>RAM:</b> {psutil.virtual_memory().percent}%"
-        f" <b>DISK:</b> {psutil.disk_usage('/').percent}%"
-    )
-
-    with download_dict_lock:
-        dlspeed_bytes = 0
-        uldl_bytes = 0
-        for download in list(download_dict.values()):
-            speedy = download.speed()
-            if download.status() == MirrorStatus.STATUS_DOWNLOADING:
-                if 'K' in speedy:
-                    dlspeed_bytes += float(speedy.split('K')[0]) * 1024
-                elif 'M' in speedy:
-                    dlspeed_bytes += float(speedy.split('M')[0]) * 1048576
-            if download.status() == MirrorStatus.STATUS_UPLOADING:
-                if 'KB/s' in speedy:
-                    uldl_bytes += float(speedy.split('K')[0]) * 1024
-                elif 'MB/s' in speedy:
-                    uldl_bytes += float(speedy.split('M')[0]) * 1048576
-
-        dlspeed = get_readable_file_size(dlspeed_bytes)
-        ulspeed = get_readable_file_size(uldl_bytes)
-        msg += (
-            f"\n<b>FREE:</b> {free} | <b>UPTIME:</b> {currentTime}"
-            f"\n<b>DL:</b> {dlspeed}/s 🔻 | <b>UL:</b> {ulspeed}/s 🔺\n"
+async def get_tg_link_message(link):
+    message = None
+    links = []
+    if link.startswith("https://t.me/hyoshcoder/"):
+        private = False
+        msg = re_match(
+            r"https:\/\/t\.me\/(?:c\/)?([^\/]+)(?:\/[^\/]+)?\/([0-9-]+)", link
         )
-
-    with status_reply_dict_lock:
-        for chat_id in list(status_reply_dict.keys()):
-            if status_reply_dict[chat_id] and msg != status_reply_dict[chat_id].text:
-                if buttons == "":
-                    editMessage(msg, status_reply_dict[chat_id])
-                else:
-                    editMessage(msg, status_reply_dict[chat_id], buttons)
-                status_reply_dict[chat_id].text = msg
-
-
-def sendStatusMessage(msg, bot):
-    if len(Interval) == 0:
-        Interval.append(setInterval(DOWNLOAD_STATUS_UPDATE_INTERVAL, update_all_messages))
-
-    total, used, free = shutil.disk_usage('.')
-    free = get_readable_file_size(free)
-    currentTime = get_readable_time(time.time() - botStartTime)
-    progress, buttons = get_readable_message()
-    progress += (
-        f"<b>CPU:</b> {psutil.cpu_percent()}%"
-        f" <b>RAM:</b> {psutil.virtual_memory().percent}%"
-        f" <b>DISK:</b> {psutil.disk_usage('/').percent}%"
-    )
-
-    with download_dict_lock:
-        dlspeed_bytes = 0
-        uldl_bytes = 0
-        for download in list(download_dict.values()):
-            speedy = download.speed()
-            if download.status() == MirrorStatus.STATUS_DOWNLOADING:
-                if 'K' in speedy:
-                    dlspeed_bytes += float(speedy.split('K')[0]) * 1024
-                elif 'M' in speedy:
-                    dlspeed_bytes += float(speedy.split('M')[0]) * 1048576
-            if download.status() == MirrorStatus.STATUS_UPLOADING:
-                if 'KB/s' in speedy:
-                    uldl_bytes += float(speedy.split('K')[0]) * 1024
-                elif 'MB/s' in speedy:
-                    uldl_bytes += float(speedy.split('M')[0]) * 1048576
-
-        dlspeed = get_readable_file_size(dlspeed_bytes)
-        ulspeed = get_readable_file_size(uldl_bytes)
-        progress += (
-            f"\n<b>FREE:</b> {free} | <b>UPTIME:</b> {currentTime}"
-            f"\n<b>DL:</b> {dlspeed}/s 🔻 | <b>UL:</b> {ulspeed}/s 🔺\n"
+    else:
+        private = True
+        msg = re_match(
+            r"tg:\/\/openmessage\?user_id=([0-9]+)&message_id=([0-9-]+)", link
         )
+        if not TgClient.user:
+            raise TgLinkException("SESSION_UTILISATEUR requise pour ce lien privé !")
 
-    with status_reply_dict_lock:
-        if msg.message.chat.id in list(status_reply_dict.keys()):
-            try:
-                message = status_reply_dict[msg.message.chat.id]
-                deleteMessage(bot, message)
-                del status_reply_dict[msg.message.chat.id]
-            except Exception as e:
-                LOGGER.error(str(e))
-                del status_reply_dict[msg.message.chat.id]
-
-        if buttons == "":
-            message = sendMessage(progress, bot, msg)
+    chat = msg[1]
+    msg_id = msg[2]
+    if "-" in msg_id:
+        start_id, end_id = msg_id.split("-")
+        msg_id = start_id = int(start_id)
+        end_id = int(end_id)
+        btw = end_id - start_id
+        if private:
+            link = link.split("&message_id=")[0]
+            links.append(f"{link}&message_id={start_id}")
+            for _ in range(btw):
+                start_id += 1
+                links.append(f"{link}&message_id={start_id}")
         else:
-            message = sendMarkup(progress, bot, msg, buttons)
-        status_reply_dict[msg.message.chat.id] = message
+            link = link.rsplit("/", 1)[0]
+            links.append(f"{link}/{start_id}")
+            for _ in range(btw):
+                start_id += 1
+                links.append(f"{link}/{start_id}")
+    else:
+        msg_id = int(msg_id)
+
+    if chat.isdigit():
+        chat = int(chat) if private else int(f"-100{chat}")
+
+    if not private:
+        message = await TgClient.bot.getMessage(chat_id=chat, message_id=msg_id)
+        if isinstance(message, Error):
+            private = True
+            if not TgClient.user:
+                raise TgLinkException(message["message"])
+
+    if not private:
+        return (links, "bot") if links else (message, "bot")
+    elif TgClient.user:
+        user_message = await TgClient.user.getMessage(chat_id=chat, message_id=msg_id)
+        if isinstance(user_message, Error):
+            raise TgLinkException(
+                f"Vous n'avez pas accès à ce chat ! ERREUR : {user_message['message']}"
+            )
+        return (links, "user") if links else (user_message, "user")
+    else:
+        raise TgLinkException("Privé : Veuillez signaler !")
+
+
+async def temp_download(msg):
+    res = await msg.download(synchronous=True)
+    return res.path
+
+
+async def update_status_message(sid, force=False):
+    if intervals["stopAll"]:
+        return
+    async with task_dict_lock:
+        if not status_dict.get(sid):
+            if obj := intervals["status"].get(sid):
+                obj.cancel()
+                del intervals["status"][sid]
+            return
+        if not force and time() - status_dict[sid]["time"] < 3:
+            return
+        status_dict[sid]["time"] = time()
+        page_no = status_dict[sid]["page_no"]
+        status = status_dict[sid]["status"]
+        is_user = status_dict[sid]["is_user"]
+        page_step = status_dict[sid]["page_step"]
+        text, buttons = await get_readable_message(
+            sid, is_user, page_no, status, page_step
+        )
+        if text is None:
+            del status_dict[sid]
+            if obj := intervals["status"].get(sid):
+                obj.cancel()
+                del intervals["status"][sid]
+            return
+        if text != status_dict[sid]["message"].text:
+            message = await edit_message(
+                status_dict[sid]["message"], text, buttons, block=False
+            )
+            if isinstance(message, str):
+                if message.startswith("Telegram indique : [40"):
+                    del status_dict[sid]
+                    if obj := intervals["status"].get(sid):
+                        obj.cancel()
+                        del intervals["status"][sid]
+                else:
+                    LOGGER.error(
+                        f"Le statut avec l'id : {sid} n'a pas été mis à jour. Erreur : {message}"
+                    )
+                return
+            status_dict[sid]["message"].text = text
+            status_dict[sid]["time"] = time()
+
+
+async def send_status_message(msg, user_id=0):
+    if intervals["stopAll"]:
+        return
+    sid = user_id or msg.chat.id
+    is_user = bool(user_id)
+    async with task_dict_lock:
+        if sid in status_dict:
+            page_no = status_dict[sid]["page_no"]
+            status = status_dict[sid]["status"]
+            page_step = status_dict[sid]["page_step"]
+            text, buttons = await get_readable_message(
+                sid, is_user, page_no, status, page_step
+            )
+            if text is None:
+                del status_dict[sid]
+                if obj := intervals["status"].get(sid):
+                    obj.cancel()
+                    del intervals["status"][sid]
+                return
+            old_message = status_dict[sid]["message"]
+            message = await send_message(msg, text, buttons, block=False)
+            if isinstance(message, str):
+                LOGGER.error(
+                    f"Le statut avec l'id : {sid} n'a pas été envoyé. Erreur : {message}"
+                )
+                return
+            await delete_message(old_message)
+            message.text = text
+            status_dict[sid].update({"message": message, "time": time()})
+        else:
+            text, buttons = await get_readable_message(sid, is_user)
+            if text is None:
+                return
+            message = await send_message(msg, text, buttons, block=False)
+            if isinstance(message, str):
+                LOGGER.error(
+                    f"Le statut avec l'id : {sid} n'a pas été envoyé. Erreur : {message}"
+                )
+                return
+            message.text = text
+            status_dict[sid] = {
+                "message": message,
+                "time": time(),
+                "page_no": 1,
+                "page_step": 1,
+                "status": "Tous",
+                "is_user": is_user,
+            }
+        if not intervals["status"].get(sid) and not is_user:
+            intervals["status"][sid] = SetInterval(
+                Config.STATUS_UPDATE_INTERVAL, update_status_message, sid
+            )

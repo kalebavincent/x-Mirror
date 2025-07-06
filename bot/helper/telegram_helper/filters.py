@@ -1,53 +1,77 @@
-from telegram.ext import filters
-from telegram import Message
-from bot import AUTHORIZED_CHATS, SUDO_USERS, OWNER_ID, download_dict, download_dict_lock
+from re import compile as re_compile, I, S, escape
+from pytdbot.types import Message
+
+from ... import user_data, auth_chats, sudo_users
+from ...core.config_manager import Config
+from ...core.telegram_client import TgClient
 
 
 class CustomFilters:
-    class _OwnerFilter(filters.MessageFilter):
-        def filter(self, message: Message) -> bool:
-            return message.from_user and message.from_user.id == OWNER_ID
 
-    owner_filter = _OwnerFilter()
+    def owner_filter(_, message, pattern=None):
+        if pattern:
+            match = pattern.match(message.text)
+            if not match:
+                return False
+        return message.from_id == Config.OWNER_ID
 
-    class _AuthorizedUserFilter(filters.MessageFilter):
-        def filter(self, message: Message) -> bool:
-            user_id = message.from_user.id if message.from_user else None
-            return user_id in AUTHORIZED_CHATS or user_id in SUDO_USERS or user_id == OWNER_ID
+    def authorized_user(_, message, pattern=None):
+        if pattern:
+            match = pattern.match(message.text)
+            if not match:
+                return False
+        uid = message.from_id
+        chat_id = message.chat_id
+        thread_id = message.message_thread_id if message.is_topic_message else None
+        return bool(
+            uid == Config.OWNER_ID
+            or (
+                uid in user_data
+                and (
+                    user_data[uid].get("AUTH", False)
+                    or user_data[uid].get("SUDO", False)
+                )
+            )
+            or (
+                chat_id in user_data
+                and user_data[chat_id].get("AUTH", False)
+                and (
+                    thread_id is None
+                    or thread_id in user_data[chat_id].get("thread_ids", [])
+                )
+            )
+            or uid in sudo_users
+            or uid in auth_chats
+            or chat_id in auth_chats
+            and (
+                auth_chats[chat_id]
+                and thread_id
+                and thread_id in auth_chats[chat_id]
+                or not auth_chats[chat_id]
+            )
+        )
 
-    authorized_user = _AuthorizedUserFilter()
+    def sudo_user(self, event, pattern=None):
+        uid = event.from_id if isinstance(event, Message) else event.sender_user_id
+        if pattern:
+            match = pattern.match(event.text)
+            if not match:
+                return False
+        return bool(
+            uid == Config.OWNER_ID
+            or uid in user_data
+            and user_data[uid].get("SUDO")
+            or uid in sudo_users
+        )
 
-    class _AuthorizedChat(filters.MessageFilter):
-        def filter(self, message: Message) -> bool:
-            return message.chat and message.chat.id in AUTHORIZED_CHATS
+    def public_user(self, message, pattern=None):
+        if pattern:
+            match = pattern.match(message.text)
+            return bool(match)
 
-    authorized_chat = _AuthorizedChat()
 
-    class _SudoUser(filters.MessageFilter):
-        def filter(self, message: Message) -> bool:
-            user_id = message.from_user.id if message.from_user else None
-            return user_id in SUDO_USERS
-
-    sudo_user = _SudoUser()
-
-    class _MirrorOwner(filters.MessageFilter):
-        def filter(self, message: Message) -> bool:
-            user_id = message.from_user.id if message.from_user else None
-            if user_id == OWNER_ID:
-                return True
-            args = str(message.text).split(' ') if message.text else []
-            if len(args) > 1:
-                with download_dict_lock:
-                    for status in download_dict.values():
-                        if status.gid() == args[1] and status.message.from_user.id == user_id:
-                            return True
-                    else:
-                        return False
-            if not message.reply_to_message and len(args) == 1:
-                return True
-            if message.reply_to_message:
-                reply_user = message.reply_to_message.from_user.id
-                return reply_user == user_id
-            return False
-
-    mirror_owner_filter = _MirrorOwner()
+def match_cmd(cmd):
+    if not isinstance(cmd, list):
+        return re_compile(rf"^/{cmd}(?:@{TgClient.NAME})?(?:\s+.*)?$", flags=I | S)
+    pattern = "|".join(escape(c) for c in cmd)
+    return re_compile(rf"^/({pattern})(?:@{TgClient.NAME})?(?:\s+.*)?$", flags=I | S)

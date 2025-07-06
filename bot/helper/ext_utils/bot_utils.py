@@ -1,238 +1,253 @@
-import logging
-import re
-import threading
-import time
-import math
+from httpx import AsyncClient
+from asyncio.subprocess import PIPE
+from functools import partial, wraps
+from concurrent.futures import ThreadPoolExecutor
+from asyncio import (
+    create_subprocess_exec,
+    create_subprocess_shell,
+    run_coroutine_threadsafe,
+    sleep,
+)
 
-from bot.helper.telegram_helper.bot_commands import BotCommands
-from bot import dispatcher, download_dict, download_dict_lock, STATUS_LIMIT
-from telegram import InlineKeyboardMarkup
-from telegram.ext import CallbackQueryHandler
-from bot.helper.telegram_helper import button_build, message_utils
+from ... import user_data, bot_loop
+from ...core.config_manager import Config
+from ..telegram_helper.button_build import ButtonMaker
+from .telegraph_helper import telegraph
+from .help_messages import (
+    YT_HELP_DICT,
+    MIRROR_HELP_DICT,
+    CLONE_HELP_DICT,
+)
 
-LOGGER = logging.getLogger(__name__)
+COMMAND_USAGE = {}
 
-MAGNET_REGEX = r"magnet:\?xt=urn:btih:[a-zA-Z0-9]*"
-
-URL_REGEX = r"(?:(?:https?|ftp):\/\/)?[\w/\-?=%.]+\.[\w/\-?=%.]+"
-
-COUNT = 0
-PAGE_NO = 1
-
-
-class MirrorStatus:
-    STATUS_UPLOADING = "Envoi en cours...📤"
-    STATUS_DOWNLOADING = "Téléchargement...📥"
-    STATUS_CLONING = "Clonage...♻️"
-    STATUS_WAITING = "En attente...📝"
-    STATUS_FAILED = "Échec 🚫. Nettoyage du téléchargement..."
-    STATUS_PAUSE = "En pause...⭕️"
-    STATUS_ARCHIVING = "Archivage...🔐"
-    STATUS_EXTRACTING = "Extraction...📂"
-    STATUS_SPLITTING = "Division...✂️"
-
-SIZE_UNITS = ['o', 'Ko', 'Mo', 'Go', 'To', 'Po']
+THREAD_POOL = ThreadPoolExecutor(max_workers=500)
 
 
-class setInterval:
-    def __init__(self, interval, action):
+class SetInterval:
+    def __init__(self, interval, action, *args, **kwargs):
         self.interval = interval
         self.action = action
-        self.stopEvent = threading.Event()
-        thread = threading.Thread(target=self.__setInterval)
-        thread.start()
+        self.task = bot_loop.create_task(self._set_interval(*args, **kwargs))
 
-    def __setInterval(self):
-        nextTime = time.time() + self.interval
-        while not self.stopEvent.wait(nextTime - time.time()):
-            nextTime += self.interval
-            self.action()
+    async def _set_interval(self, *args, **kwargs):
+        while True:
+            await sleep(self.interval)
+            await self.action(*args, **kwargs)
 
     def cancel(self):
-        self.stopEvent.set()
+        self.task.cancel()
 
-def get_readable_file_size(size_in_bytes) -> str:
-    if size_in_bytes is None:
-        return '0o'
-    index = 0
-    while size_in_bytes >= 1024:
-        size_in_bytes /= 1024
-        index += 1
+
+def _build_command_usage(help_dict, command_key):
+    buttons = ButtonMaker()
+    for name in list(help_dict.keys())[1:]:
+        buttons.data_button(name, f"help {command_key} {name}")
+    buttons.data_button("Fermer", "help close")
+    COMMAND_USAGE[command_key] = [help_dict["main"], buttons.build_menu(3)]
+    buttons.reset()
+
+
+def create_help_buttons():
+    _build_command_usage(MIRROR_HELP_DICT, "mirror")
+    _build_command_usage(YT_HELP_DICT, "yt")
+    _build_command_usage(CLONE_HELP_DICT, "clone")
+
+
+def bt_selection_buttons(id_):
+    gid = id_[:12] if len(id_) > 25 else id_
+    pin = "".join([n for n in id_ if n.isdigit()][:4])
+    buttons = ButtonMaker()
+    if Config.WEB_PINCODE:
+        buttons.url_button("Sélectionner les fichiers", f"{Config.BASE_URL}/app/files?gid={id_}")
+        buttons.data_button("Code PIN", f"sel pin {gid} {pin}")
+    else:
+        buttons.url_button(
+            "Sélectionner les fichiers", f"{Config.BASE_URL}/app/files?gid={id_}&pin={pin}"
+        )
+    buttons.data_button("Terminé", f"sel done {gid} {id_}")
+    buttons.data_button("Annuler", f"sel cancel {gid}")
+    return buttons.build_menu(2)
+
+
+async def get_telegraph_list(telegraph_content):
+    path = [
+        (
+            await telegraph.create_page(
+                title="Recherche Mirror-Leech-Bot", content=content
+            )
+        )["path"]
+        for content in telegraph_content
+    ]
+    if len(path) > 1:
+        await telegraph.edit_telegraph(path, telegraph_content)
+    buttons = ButtonMaker()
+    buttons.url_button("🔎 VOIR", f"https://telegra.ph/{path[0]}")
+    return buttons.build_menu(1)
+
+
+def arg_parser(items, arg_base):
+
+    if not items:
+        return
+
+    arg_start = -1
+    i = 0
+    total = len(items)
+
+    bool_arg_set = {
+        "-b",
+        "-e",
+        "-z",
+        "-s",
+        "-j",
+        "-d",
+        "-sv",
+        "-ss",
+        "-f",
+        "-fd",
+        "-fu",
+        "-sync",
+        "-hl",
+        "-doc",
+        "-med",
+        "-ut",
+        "-bt",
+    }
+
+    while i < total:
+        part = items[i]
+
+        if part in arg_base:
+            if arg_start == -1:
+                arg_start = i
+
+            if (
+                i + 1 == total
+                and part in bool_arg_set
+                or part
+                in [
+                    "-s",
+                    "-j",
+                    "-f",
+                    "-fd",
+                    "-fu",
+                    "-sync",
+                    "-hl",
+                    "-doc",
+                    "-med",
+                    "-ut",
+                    "-bt",
+                ]
+            ):
+                arg_base[part] = True
+            else:
+                sub_list = []
+                for j in range(i + 1, total):
+                    if items[j] in arg_base:
+                        if part in bool_arg_set and not sub_list:
+                            arg_base[part] = True
+                            break
+                        if not sub_list:
+                            break
+                        check = " ".join(sub_list).strip()
+                        if part != "-ff":
+                            break
+                        if check.startswith("[") and check.endswith("]"):
+                            break
+                        elif not check.startswith("["):
+                            break
+                    sub_list.append(items[j])
+                if sub_list:
+                    value = " ".join(sub_list)
+                    if part == "-ff":
+                        if not value.strip().startswith("["):
+                            arg_base[part].add(value)
+                        else:
+                            try:
+                                arg_base[part].add(tuple(eval(value)))
+                            except:
+                                pass
+                    else:
+                        arg_base[part] = value
+                    i += len(sub_list)
+        i += 1
+    if "link" in arg_base:
+        link_items = items[:arg_start] if arg_start != -1 else items
+        if link_items:
+            arg_base["link"] = " ".join(link_items)
+
+
+def get_size_bytes(size):
+    size = size.lower()
+    if "k" in size:
+        size = int(float(size.split("k")[0]) * 1024)
+    elif "m" in size:
+        size = int(float(size.split("m")[0]) * 1048576)
+    elif "g" in size:
+        size = int(float(size.split("g")[0]) * 1073741824)
+    elif "t" in size:
+        size = int(float(size.split("t")[0]) * 1099511627776)
+    else:
+        size = 0
+    return size
+
+
+async def get_content_type(url):
     try:
-        return f'{round(size_in_bytes, 2)}{SIZE_UNITS[index]}'
-    except IndexError:
-        return 'Fichier trop volumineux'
+        async with AsyncClient() as client:
+            response = await client.get(url, allow_redirects=True, verify=False)
+            return response.headers.get("Content-Type")
+    except:
+        return None
 
-def getDownloadByGid(gid):
-    with download_dict_lock:
-        for dl in download_dict.values():
-            status = dl.status()
-            if (
-                status
-                not in [
-                    MirrorStatus.STATUS_ARCHIVING,
-                    MirrorStatus.STATUS_EXTRACTING,
-                    MirrorStatus.STATUS_SPLITTING,
-                ]
-                and dl.gid() == gid
-            ):
-                return dl
-    return None
 
-def getAllDownload():
-    with download_dict_lock:
-        for dlDetails in download_dict.values():
-            status = dlDetails.status()
-            if (
-                status
-                not in [
-                    MirrorStatus.STATUS_ARCHIVING,
-                    MirrorStatus.STATUS_EXTRACTING,
-                    MirrorStatus.STATUS_SPLITTING,
-                    MirrorStatus.STATUS_CLONING,
-                    MirrorStatus.STATUS_UPLOADING,
-                ]
-                and dlDetails
-            ):
-                return dlDetails
-    return None
+def update_user_ldata(id_, key, value):
+    user_data.setdefault(id_, {})
+    user_data[id_][key] = value
 
-def get_progress_bar_string(status):
-    completed = status.processed_bytes() / 9
-    total = status.size_raw() / 9
-    p = 0 if total == 0 else round(completed * 100 / total)
-    p = min(max(p, 0), 100)
-    cFull = p // 9
-    p_str = '■' * cFull
-    p_str += '□' * (11 - cFull)
-    p_str = f"[{p_str}]"
-    return p_str
 
-def get_readable_message():
-    with download_dict_lock:
-        msg = ""
-        start = 0
-        if STATUS_LIMIT is not None:
-            dick_no = len(download_dict)
-            global pages
-            pages = math.ceil(dick_no/STATUS_LIMIT)
-            if pages != 0 and PAGE_NO > pages:
-                globals()['COUNT'] -= STATUS_LIMIT
-                globals()['PAGE_NO'] -= 1
-            start = COUNT
-        for index, download in enumerate(list(download_dict.values())[start:], start=1):
-            msg += f"<code>{download.name()}</code>"
-            msg += f"\n<b>Statut:</b> <i>{download.status()}</i>"
-            if download.status() not in [
-                MirrorStatus.STATUS_ARCHIVING,
-                MirrorStatus.STATUS_EXTRACTING,
-                MirrorStatus.STATUS_SPLITTING,
-            ]:
-                msg += f"\n{get_progress_bar_string(download)} {download.progress()}"
-                if download.status() == MirrorStatus.STATUS_CLONING:
-                    msg += f"\n<b>Cloné:</b> {get_readable_file_size(download.processed_bytes())} sur {download.size()}"
-                elif download.status() == MirrorStatus.STATUS_UPLOADING:
-                    msg += f"\n<b>Envoyé:</b> {get_readable_file_size(download.processed_bytes())} sur {download.size()}"
-                else:
-                    msg += f"\n<b>Téléchargé:</b> {get_readable_file_size(download.processed_bytes())} sur {download.size()}"
-                msg += f"\n<b>Vitesse:</b> {download.speed()} | <b>Temps restant:</b> {download.eta()}"
-                try:
-                    msg += f"\n<b>Seeders:</b> {download.aria_download().num_seeders}" \
-                           f" | <b>Pairs:</b> {download.aria_download().connections}"
-                except:
-                    pass
-                try:
-                    msg += f"\n<b>Seeders:</b> {download.torrent_info().num_seeds}" \
-                           f" | <b>Leechers:</b> {download.torrent_info().num_leechs}"
-                except:
-                    pass
-                msg += f"\n<code>/{BotCommands.CancelMirror} {download.gid()}</code>"
-            msg += "\n\n"
-            if STATUS_LIMIT is not None and index == STATUS_LIMIT:
-                break
-        if STATUS_LIMIT is not None and dick_no > STATUS_LIMIT:
-            msg += f"<b>Page:</b> {PAGE_NO}/{pages} | <b>Tâches:</b> {dick_no}\n"
-            buttons = button_build.ButtonMaker()
-            buttons.sbutton("Précédent", "pre")
-            buttons.sbutton("Suivant", "nex")
-            button = InlineKeyboardMarkup(buttons.build_menu(2))
-            return msg, button
-        return msg, ""
+async def cmd_exec(cmd, shell=False):
+    if shell:
+        proc = await create_subprocess_shell(cmd, stdout=PIPE, stderr=PIPE)
+    else:
+        proc = await create_subprocess_exec(*cmd, stdout=PIPE, stderr=PIPE)
+    stdout, stderr = await proc.communicate()
+    try:
+        stdout = stdout.decode().strip()
+    except:
+        stdout = "Impossible de décoder la réponse !"
+    try:
+        stderr = stderr.decode().strip()
+    except:
+        stderr = "Impossible de décoder l'erreur !"
+    return stdout, stderr, proc.returncode
 
-def turn(update, context):
-    query = update.callback_query
-    query.answer()
-    global COUNT, PAGE_NO
-    if query.data == "nex":
-        if PAGE_NO == pages:
-            COUNT = 0
-            PAGE_NO = 1
-        else:
-            COUNT += STATUS_LIMIT
-            PAGE_NO += 1
-    elif query.data == "pre":
-        if PAGE_NO == 1:
-            COUNT = STATUS_LIMIT * (pages - 1)
-            PAGE_NO = pages
-        else:
-            COUNT -= STATUS_LIMIT
-            PAGE_NO -= 1
-    message_utils.update_all_messages()
 
-def get_readable_time(seconds: int) -> str:
-    result = ''
-    (days, remainder) = divmod(seconds, 86400)
-    days = int(days)
-    if days != 0:
-        result += f'{days}d'
-    (hours, remainder) = divmod(remainder, 3600)
-    hours = int(hours)
-    if hours != 0:
-        result += f'{hours}h'
-    (minutes, seconds) = divmod(remainder, 60)
-    minutes = int(minutes)
-    if minutes != 0:
-        result += f'{minutes}m'
-    seconds = int(seconds)
-    result += f'{seconds}s'
-    return result
-
-def is_url(url: str):
-    url = re.findall(URL_REGEX, url)
-    return bool(url)
-
-def is_gdrive_link(url: str):
-    return "drive.google.com" in url
-
-def is_mega_link(url: str):
-    return "mega.nz" in url or "mega.co.nz" in url
-
-def get_mega_link_type(url: str):
-    if "folder" in url:
-        return "folder"
-    elif "file" in url:
-        return "file"
-    elif "/#F!" in url:
-        return "folder"
-    return "file"
-
-def is_magnet(url: str):
-    magnet = re.findall(MAGNET_REGEX, url)
-    return bool(magnet)
-
-def new_thread(fn):
-    """To use as decorator to make a function call threaded.
-    Needs import
-    from threading import Thread"""
-
-    def wrapper(*args, **kwargs):
-        thread = threading.Thread(target=fn, args=args, kwargs=kwargs)
-        thread.start()
-        return thread
+def new_task(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        task = bot_loop.create_task(func(*args, **kwargs))
+        return task
 
     return wrapper
 
-next_handler = CallbackQueryHandler(turn, pattern="nex")
-previous_handler = CallbackQueryHandler(turn, pattern="pre")
-dispatcher.add_handler(next_handler)
-dispatcher.add_handler(previous_handler)
+
+async def sync_to_async(func, *args, wait=True, **kwargs):
+    pfunc = partial(func, *args, **kwargs)
+    future = bot_loop.run_in_executor(THREAD_POOL, pfunc)
+    return await future if wait else future
+
+
+def async_to_sync(func, *args, wait=True, **kwargs):
+    future = run_coroutine_threadsafe(func(*args, **kwargs), bot_loop)
+    return future.result() if wait else future
+
+
+def loop_thread(func):
+    @wraps(func)
+    def wrapper(*args, wait=False, **kwargs):
+        future = run_coroutine_threadsafe(func(*args, **kwargs), bot_loop)
+        return future.result() if wait else future
+
+    return wrapper
