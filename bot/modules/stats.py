@@ -18,7 +18,8 @@ from ..helper.ext_utils.bot_utils import cmd_exec, new_task
 from ..helper.telegram_helper.message_utils import send_message
 from pytdbot.types import Message, UpdateNewCallbackQuery
 
-commands = {
+# Définition constante des commandes et regex
+COMMANDS_INFO = {
     "aria2": (["aria2c", "--version"], r"aria2 version ([\d.]+)"),
     "qBittorrent": (["qbittorrent-nox", "--version"], r"qBittorrent v([\d.]+)"),
     "SABnzbd+": (["sabnzbdplus", "--version"], r"sabnzbdplus-([\d.]+)"),
@@ -29,12 +30,12 @@ commands = {
     "7z": (["7z", "i"], r"7-Zip ([\d.]+)"),
 }
 
-
 @new_task
 async def bot_stats(_, message):
     total, used, free, disk = disk_usage("/")
     swap = swap_memory()
     memory = virtual_memory()
+    
     if await aiopath.exists(".git"):
         last_commit = await cmd_exec(
             "git log -1 --date=short --pretty=format:'%cd <b>De</b> %cr'", True
@@ -43,11 +44,10 @@ async def bot_stats(_, message):
     else:
         last_commit = "Pas de UPSTREAM_REPO"
 
-    await get_packages_version()
+    versions = await get_packages_version()
 
-    # Construire un string avec les versions mises à jour
     versions_str = "\n".join(
-        f"<b>{tool}:</b> {version}" for tool, version in commands.items()
+        f"<b>{tool}:</b> {version}" for tool, version in versions.items()
     )
 
     stats = f"""
@@ -78,7 +78,6 @@ async def bot_stats(_, message):
 """
     await send_message(message, stats)
 
-
 async def get_version_async(command, regex):
     try:
         out, err, code = await cmd_exec(command)
@@ -89,9 +88,16 @@ async def get_version_async(command, regex):
     except Exception as e:
         return f"Exception: {str(e)}"
 
-
 async def get_packages_version():
-    tasks = [get_version_async(command, regex) for command, regex in commands.values()]
-    versions = await gather(*tasks)
-    for tool, version in zip(commands.keys(), versions):
-        commands[tool] = version
+    versions = {}
+    tasks = []
+    
+    for tool, (command, regex) in COMMANDS_INFO.items():
+        tasks.append(get_version_async(command, regex))
+    
+    results = await gather(*tasks)
+    
+    for tool, version in zip(COMMANDS_INFO.keys(), results):
+        versions[tool] = version
+    
+    return versions
