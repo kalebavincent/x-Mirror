@@ -47,7 +47,7 @@ async def rss_menu(event):
     buttons.data_button("Pause", f"rss pause {user_id}")
     buttons.data_button("Reprendre", f"rss resume {user_id}")
     buttons.data_button("Se désabonner", f"rss unsubscribe {user_id}")
-    if await CustomFilters.sudo_user("", event):
+    if CustomFilters.sudo_user("", event):
         buttons.data_button("Tous les abonnements", f"rss listall {user_id} 0")
         buttons.data_button("Tout mettre en pause", f"rss allpause {user_id}")
         buttons.data_button("Tout reprendre", f"rss allresume {user_id}")
@@ -203,7 +203,7 @@ async def rss_sub(_, message, pre_event):
     if msg:
         await database.rss_update(user_id)
         await send_message(message, msg)
-        is_sudo = await CustomFilters.sudo_user(_, message)
+        is_sudo = CustomFilters.sudo_user(_, message)
         if scheduler.state == 2:
             scheduler.resume()
         elif is_sudo and not scheduler.running:
@@ -229,7 +229,7 @@ async def rss_update(_, message, pre_event, state):
     user_id = message.from_id
     handler_dict[user_id] = False
     titles = message.text.split()
-    is_sudo = await CustomFilters.sudo_user(_, message)
+    is_sudo = CustomFilters.sudo_user(_, message)
     updated = []
     for title in titles:
         title = title.strip()
@@ -482,7 +482,7 @@ async def rss_listener(client, query):
     user_id = query.sender_user_id
     message = await query.getMessage()
     data = query.text.split()
-    if int(data[2]) != user_id and not await CustomFilters.sudo_user("", query):
+    if int(data[2]) != user_id and not CustomFilters.sudo_user("", query):
         await query.answer(
             text="Vous n'avez pas la permission d'utiliser ces boutons !", show_alert=True
         )

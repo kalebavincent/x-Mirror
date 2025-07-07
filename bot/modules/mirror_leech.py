@@ -1,6 +1,11 @@
 from aiofiles.os import path as aiopath
 from base64 import b64encode
 from re import match as re_match
+from pytdbot.types import (
+    MessageDocument, MessagePhoto, MessageVideo, MessageAudio,
+    MessageVoiceNote, MessageVideoNote, MessageSticker, MessageAnimation,
+    MessageText
+)
 
 from .. import LOGGER, bot_loop, task_dict_lock, DOWNLOAD_DIR
 from ..helper.ext_utils.bot_utils import (
@@ -255,30 +260,25 @@ class Mirror(TaskListener):
             return
 
         if reply_to:
-            file_ = (
-                reply_to.content.document
-                or reply_to.content.photo
-                or reply_to.content.video
-                or reply_to.content.audio
-                or reply_to.content.voice_note
-                or reply_to.content.video_note
-                or reply_to.content.sticker
-                or reply_to.content.animation
-                or None
-            )
-
-            if file_ is None:
-                if reply_text := reply_to.text:
-                    self.link = reply_text.split("\n", 1)[0].strip()
-                else:
-                    reply_to = None
-            elif reply_to.content.document and (
-                file_.mime_type == "application/x-bittorrent"
-                or file_.file_name.endswith((".torrent", ".dlc", ".nzb"))
-            ):
-                res = await reply_to.download(synchronous=True)
-                self.link = res.path
-                file_ = None
+            content = reply_to.content
+            
+            # Gestion sécurisée des différents types de messages
+            if isinstance(content, MessageText):
+                # Message texte
+                self.link = content.text.split("\n", 1)[0].strip()
+            elif isinstance(content, MessageDocument):
+                # Document
+                file_ = content.document
+                if file_.mime_type == "application/x-bittorrent" or (file_.file_name and file_.file_name.endswith((".torrent", ".dlc", ".nzb"))):
+                    res = await reply_to.download(synchronous=True)
+                    self.link = res.path
+                    file_ = None
+            elif isinstance(content, (MessagePhoto, MessageVideo, MessageAudio, MessageVoiceNote, MessageVideoNote, MessageSticker, MessageAnimation)):
+                # Autres types de médias
+                file_ = getattr(content, content.__class__.__name__[7:].lower())
+            else:
+                # Type de message non pris en charge
+                reply_to = None
 
         if (
             not self.link

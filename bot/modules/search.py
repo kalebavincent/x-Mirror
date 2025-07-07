@@ -257,7 +257,15 @@ async def torrent_search_update(_, query):
     reply_to = await message.getRepliedMessage()
     key = reply_to.text.split(maxsplit=1)
     key = key[1].strip() if len(key) > 1 else None
-    data = query.data.split()
+    
+    try:
+        data_bytes = query.query.data  # Données brutes (bytes)
+        data_str = data_bytes.decode('utf-8')  # Conversion en string
+        data = data_str.split()
+    except AttributeError:
+        await query.answer("Erreur de traitement des données.", show_alert=True)
+        return
+    
     if user_id != int(data[1]):
         await query.answer("Ce n'est pas à vous !", show_alert=True)
     elif data[2].startswith("api"):
