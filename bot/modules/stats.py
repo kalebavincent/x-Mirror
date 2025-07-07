@@ -45,6 +45,11 @@ async def bot_stats(_, message):
 
     await get_packages_version()
 
+    # Construire un string avec les versions mises à jour
+    versions_str = "\n".join(
+        f"<b>{tool}:</b> {version}" for tool, version in commands.items()
+    )
+
     stats = f"""
 <b>Date du commit:</b> {last_commit}
 
@@ -69,14 +74,7 @@ async def bot_stats(_, message):
 <b>Mémoire libre:</b> {get_readable_file_size(memory.available)}
 <b>Mémoire utilisée:</b> {get_readable_file_size(memory.used)}
 
-<b>Python:</b> {commands["python"]}
-<b>Aria2:</b> {commands["aria2"]}
-<b>qBittorrent:</b> {commands["qBittorrent"]}
-<b>SABnzbd+:</b> {commands["SABnzbd+"]}
-<b>Rclone:</b> {commands["rclone"]}
-<b>yt-dlp:</b> {commands["yt-dlp"]}
-<b>FFmpeg:</b> {commands["ffmpeg"]}
-<b>7-Zip:</b> {commands["7z"]}
+{versions_str}
 """
     await send_message(message, stats)
 
