@@ -198,7 +198,8 @@ async def update_status_message(sid, force=False):
                 obj.cancel()
                 del intervals["status"][sid]
             return
-        if text != status_dict[sid]["message"].text:
+        # Compare with stored text instead of Message.text
+        if text != status_dict[sid]["current_text"]:
             message = await edit_message(
                 status_dict[sid]["message"], text, buttons, block=False
             )
@@ -213,14 +214,13 @@ async def update_status_message(sid, force=False):
                         f"Le statut avec l'id : {sid} n'a pas été mis à jour. Erreur : {message}"
                     )
                 return
-            status_dict[sid]["message"].text = text
+            # Store current text instead of updating Message.text
+            status_dict[sid]["current_text"] = text
             status_dict[sid]["time"] = time()
-
 
 async def send_status_message(msg, user_id=0):
     if intervals["stopAll"]:
         return
-    # Correction ici: utilisation de chat_id au lieu de chat.id
     sid = user_id or (msg.chat_id if hasattr(msg, 'chat_id') else None)
     
     if sid is None:
@@ -249,9 +249,13 @@ async def send_status_message(msg, user_id=0):
                     f"Le statut avec l'id : {sid} n'a pas été envoyé. Erreur : {message}"
                 )
                 return
+            # Store current text instead of updating Message.text
+            status_dict[sid].update({
+                "message": message, 
+                "current_text": text,  # Add stored text
+                "time": time()
+            })
             await delete_message(old_message)
-            message.text = text
-            status_dict[sid].update({"message": message, "time": time()})
         else:
             text, buttons = await get_readable_message(sid, is_user)
             if text is None:
@@ -262,9 +266,10 @@ async def send_status_message(msg, user_id=0):
                     f"Le statut avec l'id : {sid} n'a pas été envoyé. Erreur : {message}"
                 )
                 return
-            message.text = text
+            # Initialize with stored text
             status_dict[sid] = {
                 "message": message,
+                "current_text": text,  # Store initial text
                 "time": time(),
                 "page_no": 1,
                 "page_step": 1,

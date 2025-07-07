@@ -71,8 +71,13 @@ class CustomFilters:
         )
 
     def sudo_user(self, event, pattern=None):
-        # Utilisation de from_id au lieu de sender_user_id
-        uid = event.from_id
+        # Get user ID based on event type
+        if hasattr(event, 'sender_user_id'):  # CallbackQuery events
+            uid = event.sender_user_id
+        elif hasattr(event, 'from_id') and hasattr(event.from_id, 'user_id'):  # Message events
+            uid = event.from_id.user_id
+        else:
+            return False
         
         # Gestion du texte pour différents types d'événements
         text_content = None
