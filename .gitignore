@@ -15,6 +15,13 @@ cfg.zip
 list_drives.txt
 cookies.txt
 __pycache__/
+# python compiled files, caches, and logs
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.py[cod]
+# C extensions
 *.pyc
 *.pyo
 *.pyd
