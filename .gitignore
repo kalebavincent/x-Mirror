@@ -33,3 +33,13 @@ __pycache__/
 *.bak
 *.swp
 *.tmp
+# env
+.env
+# virtual environment
+venv/
+env/
+# IDE specific files
+.idea/
+.vscode/
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
