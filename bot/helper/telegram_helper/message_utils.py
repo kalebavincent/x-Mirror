@@ -77,7 +77,7 @@ async def send_rss(text, chat_id, thread_id):
             LOGGER.warning(res["message"])
             wait_for = int(res["message"].rsplit(" ", 1)[-1])
             await sleep(wait_for * 1.2)
-            return await send_rss(text)
+            return await send_rss(text, chat_id, thread_id)
         LOGGER.error(res["message"])
         return res["message"]
     return res
@@ -220,7 +220,13 @@ async def update_status_message(sid, force=False):
 async def send_status_message(msg, user_id=0):
     if intervals["stopAll"]:
         return
-    sid = user_id or msg.chat.id
+    # Correction ici: utilisation de chat_id au lieu de chat.id
+    sid = user_id or (msg.chat_id if hasattr(msg, 'chat_id') else None)
+    
+    if sid is None:
+        LOGGER.error("Impossible de déterminer l'ID de chat")
+        return
+
     is_user = bool(user_id)
     async with task_dict_lock:
         if sid in status_dict:

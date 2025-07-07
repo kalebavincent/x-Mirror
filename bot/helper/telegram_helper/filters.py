@@ -1,5 +1,5 @@
 from re import compile as re_compile, I, S, escape
-from pytdbot.types import Message, UpdateMessageEdited, UpdateNewMessage
+from pytdbot.types import Message
 
 from ... import user_data, auth_chats, sudo_users
 from ...core.config_manager import Config
@@ -9,39 +9,39 @@ from ...core.telegram_client import TgClient
 class CustomFilters:
 
     def owner_filter(_, message, pattern=None):
-        text = None
-
-        if isinstance(message, (UpdateNewMessage, UpdateMessageEdited)):
-            text = getattr(message.message.content.text, 'text', None)
-            uid = getattr(message.message.sender_user, 'user_id', None)
-        else:
-            text = getattr(message, 'text', None)
-            uid = getattr(message, 'from_id', None)
-
-        if pattern and text:
-            match = pattern.match(text)
+        # Gestion des messages édités et différents types de contenu
+        text_content = None
+        if hasattr(message, 'text'):
+            text_content = message.text
+        elif hasattr(message, 'content') and hasattr(message.content, 'text'):
+            text_content = message.content.text
+        
+        if pattern:
+            if not text_content:
+                return False
+            match = pattern.match(text_content)
             if not match:
                 return False
-        return uid == Config.OWNER_ID
+        return message.from_id == Config.OWNER_ID
 
     def authorized_user(_, message, pattern=None):
-        text = None
-        uid = None
-        chat_id = getattr(message, 'chat_id', None)
-        thread_id = getattr(message, 'message_thread_id', None)
-
-        if isinstance(message, (UpdateNewMessage, UpdateMessageEdited)):
-            text = getattr(message.message.content.text, 'text', None)
-            uid = getattr(message.message.sender_user, 'user_id', None)
-        else:
-            text = getattr(message, 'text', None)
-            uid = getattr(message, 'from_id', None)
-
-        if pattern and text:
-            match = pattern.match(text)
+        # Gestion des messages édités et différents types de contenu
+        text_content = None
+        if hasattr(message, 'text'):
+            text_content = message.text
+        elif hasattr(message, 'content') and hasattr(message.content, 'text'):
+            text_content = message.content.text
+        
+        if pattern:
+            if not text_content:
+                return False
+            match = pattern.match(text_content)
             if not match:
                 return False
-
+        
+        uid = message.from_id
+        chat_id = message.chat_id
+        thread_id = getattr(message, 'message_thread_id', None)
         return bool(
             uid == Config.OWNER_ID
             or (
@@ -70,22 +70,24 @@ class CustomFilters:
             )
         )
 
-    def sudo_user(_, message, pattern=None):
-        text = None
-        uid = None
-
-        if isinstance(message, (UpdateNewMessage, UpdateMessageEdited)):
-            text = getattr(message.message.content.text, 'text', None)
-            uid = getattr(message.message.sender_user, 'user_id', None)
-        else:
-            text = getattr(message, 'text', None)
-            uid = getattr(message, 'from_id', None)
-
-        if pattern and text:
-            match = pattern.match(text)
+    def sudo_user(self, event, pattern=None):
+        # Utilisation de from_id au lieu de sender_user_id
+        uid = event.from_id
+        
+        # Gestion du texte pour différents types d'événements
+        text_content = None
+        if hasattr(event, 'text'):
+            text_content = event.text
+        elif hasattr(event, 'content') and hasattr(event.content, 'text'):
+            text_content = event.content.text
+        
+        if pattern:
+            if not text_content:
+                return False
+            match = pattern.match(text_content)
             if not match:
                 return False
-
+        
         return bool(
             uid == Config.OWNER_ID
             or uid in user_data
@@ -93,17 +95,20 @@ class CustomFilters:
             or uid in sudo_users
         )
 
-    def public_user(_, message, pattern=None):
-        text = None
-
-        if isinstance(message, (UpdateNewMessage, UpdateMessageEdited)):
-            text = getattr(message.message.content.text, 'text', None)
-        else:
-            text = getattr(message, 'text', None)
-
-        if pattern and text:
-            match = pattern.match(text)
+    def public_user(self, message, pattern=None):
+        # Gestion des messages édités et différents types de contenu
+        text_content = None
+        if hasattr(message, 'text'):
+            text_content = message.text
+        elif hasattr(message, 'content') and hasattr(message.content, 'text'):
+            text_content = message.content.text
+        
+        if pattern:
+            if not text_content:
+                return False
+            match = pattern.match(text_content)
             return bool(match)
+        return False
 
 
 def match_cmd(cmd):
