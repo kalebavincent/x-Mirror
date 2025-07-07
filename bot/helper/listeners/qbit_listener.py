@@ -206,7 +206,8 @@ async def on_download_start(tag):
             "seeding": False,
         }
         if not intervals["qb"]:
-            intervals["qb"] = await _qb_listener()from aiofiles.os import remove, path as aiopath
+            intervals["qb"] = await _qb_listener()
+            from aiofiles.os import remove, path as aiopath
 from asyncio import sleep, TimeoutError
 from time import time
 from aiohttp.client_exceptions import ClientError
