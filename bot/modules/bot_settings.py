@@ -651,7 +651,7 @@ async def edit_bot_settings(client, query):
             "Synchronisation démarrée. Cela prend jusqu'à 2 sec !", show_alert=True
         )
         nzb_options.clear()
-        await update_nzb_options()
+        # await update_nzb_options()
         await database.update_nzb_config()
     elif data[1] == "syncqbit":
         await query.answer(
