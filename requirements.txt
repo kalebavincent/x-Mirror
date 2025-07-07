@@ -23,6 +23,7 @@ psutil
 pymongo
 pytdbot[tdjson]
 python-magic
+python-dotenv
 requests
 telegraph
 tenacity

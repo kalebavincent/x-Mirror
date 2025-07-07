@@ -62,6 +62,8 @@ class Config:
     USE_SERVICE_ACCOUNTS = False
     WEB_PINCODE = False
     YT_DLP_OPTIONS = {}
+    DATABASE_ENCRYPTION_KEY = ""
+    USER_SESSION_STRING = ""
 
 
     @classmethod

@@ -25,6 +25,7 @@ class TgClient:
             default_parse_mode="html",
             files_directory="/mltb/tdlib_bot",
             workers=None,
+            database_encryption_key=Config.DATABASE_ENCRYPTION_KEY,
         )
         await cls.bot.start()
         me = await cls.bot.getMe()
