@@ -261,11 +261,13 @@ class Mirror(TaskListener):
 
         if reply_to:
             content = reply_to.content
-            
-            # Gestion sécurisée des différents types de messages
+
             if isinstance(content, MessageText):
-                # Message texte
-                self.link = content.text.split("\n", 1)[0].strip()
+                text = getattr(content.text, "text", None)
+                if text:
+                    self.link = text.split("\n", 1)[0].strip()
+                else:
+                    self.link = None
             elif isinstance(content, MessageDocument):
                 # Document
                 file_ = content.document
@@ -274,11 +276,10 @@ class Mirror(TaskListener):
                     self.link = res.path
                     file_ = None
             elif isinstance(content, (MessagePhoto, MessageVideo, MessageAudio, MessageVoiceNote, MessageVideoNote, MessageSticker, MessageAnimation)):
-                # Autres types de médias
                 file_ = getattr(content, content.__class__.__name__[7:].lower())
             else:
-                # Type de message non pris en charge
                 reply_to = None
+
 
         if (
             not self.link
