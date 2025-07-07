@@ -518,6 +518,7 @@ async def ffmpeg_variables(
                 .get(key, {})
                 .get(index, {})
                 .get(value, "")
+            )
             msg = f"Modifier cette variable FFmpeg : <u>{key}</u>\n\nÉlément : {ffc[key][int(index)]}\n\nVariable : {value}"
             if old_value:
                 msg += f"\n\nValeur actuelle : {old_value}"
