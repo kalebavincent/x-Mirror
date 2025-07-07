@@ -52,6 +52,7 @@ USE_SERVICE_ACCOUNTS = get_bool(os.getenv("USE_SERVICE_ACCOUNTS", "False"))
 NAME_SUBSTITUTE = os.getenv("NAME_SUBSTITUTE", "")
 FFMPEG_CMDS = get_dict(os.getenv("FFMPEG_CMDS", "{}"))
 UPLOAD_PATHS = get_dict(os.getenv("UPLOAD_PATHS", "{}"))
+RSS_CHAT = get_list(os.getenv("RSS_CHAT", "0"))
 
 # GDrive Tools
 GDRIVE_ID = os.getenv("GDRIVE_ID", "")

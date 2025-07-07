@@ -64,6 +64,7 @@ class Config:
     YT_DLP_OPTIONS = {}
     DATABASE_ENCRYPTION_KEY = ""
     USER_SESSION_STRING = ""
+    RSS_CHAT = "0"
 
 
     @classmethod

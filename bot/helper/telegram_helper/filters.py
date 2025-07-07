@@ -22,7 +22,7 @@ class CustomFilters:
                 return False
         uid = message.from_id
         chat_id = message.chat_id
-        thread_id = message.message_thread_id if message.is_topic_message else None
+        thread_id = getattr(message, 'message_thread_id', None)
         return bool(
             uid == Config.OWNER_ID
             or (
