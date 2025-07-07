@@ -21,6 +21,7 @@ par2cmdline-turbo
 pillow
 psutil
 pymongo
+pyrogram
 pytdbot[tdjson]
 python-magic
 python-dotenv
