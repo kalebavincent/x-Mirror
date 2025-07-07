@@ -14,3 +14,15 @@ log.txt
 cfg.zip
 list_drives.txt
 cookies.txt
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.bak
+*.swp
+*.tmp
