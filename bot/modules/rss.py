@@ -487,17 +487,17 @@ async def rss_listener(client, query):
             text="Vous n'avez pas la permission d'utiliser ces boutons !", show_alert=True
         )
     elif data[1] == "close":
-        await query.answer()
+        await query.answer(text="...")
         handler_dict[user_id] = False
         reply_to = await message.getRepliedMessage()
         await delete_message(reply_to)
         await delete_message(message)
     elif data[1] == "back":
-        await query.answer()
+        await query.answer(text="...")
         handler_dict[user_id] = False
         await update_rss_menu(query)
     elif data[1] == "sub":
-        await query.answer()
+        await query.answer(text="...")
         handler_dict[user_id] = False
         buttons = ButtonMaker()
         buttons.data_button("Retour", f"rss back {user_id}")
@@ -511,7 +511,7 @@ async def rss_listener(client, query):
         if len(rss_dict.get(int(data[2]), {})) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
         else:
-            await query.answer()
+            await query.answer(text="...")
             start = int(data[3])
             await rss_list(query, start)
     elif data[1] == "get":
@@ -519,7 +519,7 @@ async def rss_listener(client, query):
         if len(rss_dict.get(int(data[2]), {})) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
         else:
-            await query.answer()
+            await query.answer(text="...")
             buttons = ButtonMaker()
             buttons.data_button("Retour", f"rss back {user_id}")
             buttons.data_button("Fermer", f"rss close {user_id}")
@@ -536,7 +536,7 @@ async def rss_listener(client, query):
         if len(rss_dict.get(int(data[2]), {})) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
         else:
-            await query.answer()
+            await query.answer(text="...")
             buttons = ButtonMaker()
             buttons.data_button("Retour", f"rss back {user_id}")
             if data[1] == "pause":
@@ -559,7 +559,7 @@ async def rss_listener(client, query):
         if len(rss_dict.get(int(data[2]), {})) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
         else:
-            await query.answer()
+            await query.answer(text="...")
             buttons = ButtonMaker()
             buttons.data_button("Retour", f"rss back {user_id}")
             buttons.data_button("Fermer", f"rss close {user_id}")
@@ -580,7 +580,7 @@ Délai d'expiration : 60 sec. Argument -c pour commande et arguments
         if len(rss_dict.get(int(data[2]), {})) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
             return
-        await query.answer()
+        await query.answer(text="...")
         if data[1].endswith("unsub"):
             async with rss_dict_lock:
                 del rss_dict[int(data[2])]
@@ -603,7 +603,7 @@ Délai d'expiration : 60 sec. Argument -c pour commande et arguments
         if len(rss_dict) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
             return
-        await query.answer()
+        await query.answer(text="...")
         if data[1].endswith("unsub"):
             async with rss_dict_lock:
                 rss_dict.clear()
@@ -632,7 +632,7 @@ Délai d'expiration : 60 sec. Argument -c pour commande et arguments
         if len(rss_dict) == 0:
             await query.answer(text="Aucun abonnement !", show_alert=True)
         else:
-            await query.answer()
+            await query.answer(text="...")
             buttons = ButtonMaker()
             buttons.data_button("Retour", f"rss back {user_id}")
             buttons.data_button("Fermer", f"rss close {user_id}")
@@ -645,12 +645,12 @@ Délai d'expiration : 60 sec. Argument -c pour commande et arguments
         if not rss_dict:
             await query.answer(text="Aucun abonnement !", show_alert=True)
         else:
-            await query.answer()
+            await query.answer(text="...")
             start = int(data[3])
             await rss_list(query, start, all_users=True)
     elif data[1] == "shutdown":
         if scheduler.running:
-            await query.answer()
+            await query.answer(text="...")
             scheduler.shutdown(wait=False)
             await sleep(0.5)
             await update_rss_menu(query)
@@ -658,7 +658,7 @@ Délai d'expiration : 60 sec. Argument -c pour commande et arguments
             await query.answer(text="Déjà arrêté !", show_alert=True)
     elif data[1] == "start":
         if not scheduler.running:
-            await query.answer()
+            await query.answer(text="...")
             add_job()
             scheduler.start()
             await update_rss_menu(query)

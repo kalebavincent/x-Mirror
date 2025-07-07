@@ -149,7 +149,7 @@ async def cancel_all_update(_, query):
     if not is_sudo and user_id and user_id != query.sender_user_id:
         await query.answer("Pas à vous !", show_alert=True)
     else:
-        await query.answer()
+        await query.answer(text="...")
     if data[1] == "close":
         await delete_message(reply_to)
         await delete_message(message)
