@@ -15,7 +15,7 @@ async def start(_, message):
     )
     buttons.url_button("Propriétaire du code", "https://t.me/hyoshcoder")
     reply_markup = buttons.build_menu(2)
-    if await CustomFilters.authorized_user(_, message):
+    if CustomFilters.authorized_user(_, message):
         start_string = f"""
 Ce bot peut copier des liens|fichiers Telegram|torrents|nzb|cloud rclone vers n'importe quel cloud rclone, Google Drive ou Telegram.
 Tapez /{BotCommands.HelpCommand} pour obtenir la liste des commandes disponibles
