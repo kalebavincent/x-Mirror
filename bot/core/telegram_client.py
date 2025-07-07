@@ -29,7 +29,7 @@ class TgClient:
         )
         await cls.bot.start()
         me = await cls.bot.getMe()
-        cls.NAME = me.usernames.editable_username if me.usernames else me.first_name
+        # cls.NAME = me.usernames.editable_username if me.usernames else me.first_name
 
     @classmethod
     async def start_user(cls):
